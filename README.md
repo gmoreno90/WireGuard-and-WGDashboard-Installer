@@ -32,7 +32,7 @@ This repository provides a fully automated Bash script to install and configure 
 
 Download the script:
 
-    curl -O https://raw.githubusercontent.com/gmoreno90/WireGuard-and-WGDasboard-Installer/main/install-wireguard-wgdashboard.sh
+    curl -O https://raw.githubusercontent.com/gmoreno90/WireGuard-and-WGDashboard-Installer/refs/heads/main/install-wireguard-wgdashboard.sh
 
 
 Make it executable:
