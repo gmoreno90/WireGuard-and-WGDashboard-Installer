@@ -2,7 +2,7 @@
 set -e
 
 echo "🔧 Installing WireGuard and WGDashboard with Domain Support on Debian 12..."
-echo "⚠️  This script has been fixed to handle network interface detection and persistent rules"
+echo "⚠️  This script has been fixed to handle IP forwarding and network interface detection"
 
 # Detect the primary network interface automatically
 echo "🔍 Detecting primary network interface..."
@@ -51,18 +51,32 @@ EOF
 
 echo "🌐 Server public key: $PUBLIC_KEY"
 
-# Step 3: Enable IP forwarding permanently
+# Step 3: Enable IP forwarding permanently (FIXED)
 echo "🔀 Enabling IP forwarding..."
-if ! grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf; then
-    echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+
+# Remove any existing conflicting entries
+sed -i '/^net.ipv4.ip_forward/d' /etc/sysctl.conf
+sed -i '/^#net.ipv4.ip_forward/d' /etc/sysctl.conf
+
+# Add IP forwarding setting
+echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
+
+# Apply the setting immediately
+sysctl -w net.ipv4.ip_forward=1
+
+# Verify it's enabled
+if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
+    echo "✅ IP forwarding is now enabled"
+else
+    echo "❌ ERROR: IP forwarding could not be enabled"
+    exit 1
 fi
-sysctl -p
 
 # Step 4: Setup initial iptables rules
 echo "🔥 Setting up firewall rules..."
 # Clean any existing conflicting rules
-iptables -t nat -F POSTROUTING || true
-iptables -F FORWARD || true
+iptables -t nat -F POSTROUTING 2>/dev/null || true
+iptables -F FORWARD 2>/dev/null || true
 
 # Add the correct rules
 iptables -t nat -A POSTROUTING -s 10.99.99.0/24 -o $PRIMARY_INTERFACE -j MASQUERADE
@@ -72,6 +86,7 @@ iptables -A FORWARD -i wg0 -o $PRIMARY_INTERFACE -m state --state RELATED,ESTABL
 iptables -A FORWARD -i $PRIMARY_INTERFACE -o wg0 -m state --state RELATED,ESTABLISHED -j ACCEPT
 
 # Save rules for persistence
+echo "💾 Saving firewall rules..."
 netfilter-persistent save
 
 # Step 5: Enable and start WireGuard
@@ -131,34 +146,7 @@ systemctl daemon-reload
 systemctl enable wgdashboard
 systemctl start wgdashboard
 
-# Step 11: Generate client configuration template
-echo "👤 Generating client configuration template..."
-cd /etc/wireguard
-umask 077
-wg genkey | tee client1-private.key | wg pubkey > client1-public.key
-CLIENT_PRIVATE_KEY=$(cat client1-private.key)
-CLIENT_PUBLIC_KEY=$(cat client1-public.key)
-
-# Add client to server configuration
-wg set wg0 peer $CLIENT_PUBLIC_KEY allowed-ips 10.99.99.2/32
-wg-quick save wg0
-
-# Create client configuration file
-cat > client1.conf <<EOF
-[Interface]
-PrivateKey = $CLIENT_PRIVATE_KEY
-Address = 10.99.99.2/32
-MTU = 1420
-DNS = 8.8.8.8, 1.1.1.1
-
-[Peer]
-PublicKey = $PUBLIC_KEY
-AllowedIPs = 0.0.0.0/0
-Endpoint = $(curl -s http://checkip.amazonaws.com || echo "YOUR_SERVER_IP"):51820
-PersistentKeepalive = 25
-EOF
-
-# Step 12: Create verification script
+# Step 11: Create verification script
 cat > /root/check-vpn.sh <<'EOF'
 #!/bin/bash
 echo "=== WireGuard Status ==="
@@ -167,22 +155,26 @@ systemctl status wg-quick@wg0 --no-pager -l
 echo -e "\n=== WireGuard Peers ==="
 wg show
 
+echo -e "\n=== IP Forwarding Status ==="
+echo "Current value: $(cat /proc/sys/net/ipv4/ip_forward)"
+echo "Should be: 1"
+
 echo -e "\n=== NAT Rules ==="
 iptables -t nat -L -n -v | grep -E "(MASQUERADE|Chain)"
 
 echo -e "\n=== Forward Rules ==="
 iptables -L FORWARD -n -v
 
-echo -e "\n=== IP Forwarding ==="
-cat /proc/sys/net/ipv4/ip_forward
-
 echo -e "\n=== Network Interface ==="
 ip route show default
+
+echo -e "\n=== Sysctl Configuration ==="
+grep "net.ipv4.ip_forward" /etc/sysctl.conf
 EOF
 
 chmod +x /root/check-vpn.sh
 
-# Step 13: Final verification
+# Step 12: Final verification
 echo "🔍 Verifying installation..."
 sleep 2
 
@@ -200,10 +192,18 @@ else
     exit 1
 fi
 
-# Get server IP
-IPADDR=$(curl -s http://checkip.amazonaws.com || hostname -I | awk '{print $1}')
+# Verify IP forwarding one more time
+if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
+    echo "✅ IP forwarding is active"
+else
+    echo "❌ IP forwarding verification failed"
+    exit 1
+fi
 
-# Step 14: Output results
+# Get server IP
+IPADDR=$(curl -s http://checkip.amazonaws.com 2>/dev/null || hostname -I | awk '{print $1}')
+
+# Step 13: Output results
 echo ""
 echo "🎉 WireGuard and WGDashboard have been successfully installed!"
 echo ""
@@ -221,17 +221,18 @@ echo ""
 echo "🔍 Useful Commands:"
 echo "   Check VPN status: /root/check-vpn.sh"
 echo "   View active peers: wg show"
-echo "   Add new client: wg set wg0 peer CLIENT_PUBLIC_KEY allowed-ips 10.99.99.X/32"
+echo "   Add new client: Use the WGDashboard web interface"
 echo "   Save config: wg-quick save wg0"
 echo ""
 echo "⚠️  IMPORTANT NOTES:"
 echo "   1. Change the dashboard password after first login"
 echo "   2. Server is ready to accept client connections"
-echo "   3. Add clients manually using the dashboard or wg command"
+echo "   3. Use the WGDashboard web interface to add clients"
 echo "   4. For domain setup, create an A record pointing to $IPADDR (disable Cloudflare proxy)"
-echo "   5. Firewall rules are automatically saved and will persist after reboot"
+echo "   5. IP forwarding is now properly enabled and persistent"
+echo "   6. Firewall rules are automatically saved and will persist after reboot"
 echo ""
-echo "📱 Manual Client Setup Template:"
+echo "📱 Client Configuration Template (for manual setup if needed):"
 echo "   [Interface]"
 echo "   PrivateKey = CLIENT_PRIVATE_KEY"
 echo "   Address = 10.99.99.X/32"
