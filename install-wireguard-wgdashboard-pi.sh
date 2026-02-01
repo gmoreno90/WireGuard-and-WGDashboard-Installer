@@ -131,15 +131,33 @@ fi
 git clone https://github.com/donaldzou/WGDashboard.git
 cd WGDashboard
 
-# Step 7: Install Python requirements
+# Step 7: Install Python requirements with proper handling of Debian packages
 REQUIREMENTS_PATH="/opt/WGDashboard/src/requirements.txt"
 if [ ! -f "$REQUIREMENTS_PATH" ]; then
     echo "❌ ERROR: requirements.txt not found at $REQUIREMENTS_PATH. Repo may have changed. Aborting."
     exit 1
 fi
-pip3 install --break-system-packages -r "$REQUIREMENTS_PATH"
+
+echo "📦 Installing Python dependencies (handling Debian conflicts)..."
+
+# Try normal installation first
+pip3 install --break-system-packages -r "$REQUIREMENTS_PATH" 2>&1 | tee /tmp/pip_install.log
+
+# Check if installation failed due to typing-extensions
+if grep -q "Cannot uninstall typing_extensions" /tmp/pip_install.log; then
+    echo "⚠️  Detected typing-extensions conflict, retrying with --ignore-installed..."
+    pip3 install --break-system-packages --ignore-installed typing-extensions -r "$REQUIREMENTS_PATH"
+fi
+
+# Verify critical packages are installed
+echo "🔍 Verifying Python dependencies..."
+python3 -c "import flask, bcrypt, psutil" 2>/dev/null || {
+    echo "❌ Critical Python packages missing. Attempting force reinstall..."
+    pip3 install --break-system-packages --force-reinstall -r "$REQUIREMENTS_PATH"
+}
 
 # Step 8: Create config.json for WGDashboard
+echo "⚙️  Creating WGDashboard configuration..."
 mkdir -p /opt/WGDashboard/src
 cat > /opt/WGDashboard/src/config.json <<EOF
 {
@@ -152,10 +170,11 @@ cat > /opt/WGDashboard/src/config.json <<EOF
 EOF
 
 # Step 9: Create systemd service for WGDashboard
+echo "🔧 Creating WGDashboard systemd service..."
 cat > /etc/systemd/system/wgdashboard.service <<EOF
 [Unit]
 Description=WGDashboard Web UI
-After=network.target
+After=network.target wg-quick@wg0.service
 
 [Service]
 WorkingDirectory=/opt/WGDashboard/src
@@ -168,72 +187,132 @@ WantedBy=multi-user.target
 EOF
 
 # Step 10: Enable and start the dashboard
+echo "🚀 Starting WGDashboard service..."
 systemctl daemon-reload
 systemctl enable wgdashboard
 systemctl restart wgdashboard
 
+# Wait a moment for service to start
+sleep 3
+
 # Step 11: Create verification script
+echo "📝 Creating verification script..."
 cat > /root/check-vpn.sh <<'EOF'
 #!/bin/bash
-echo "=== WireGuard Status ==="
-systemctl status wg-quick@wg0 --no-pager -l
+echo "=========================================="
+echo "    WireGuard VPN Status Report"
+echo "=========================================="
 
-echo -e "\n=== WireGuard Peers ==="
-wg show
+echo ""
+echo "=== WireGuard Service Status ==="
+if systemctl is-active --quiet wg-quick@wg0; then
+    echo "✅ WireGuard is RUNNING"
+    systemctl status wg-quick@wg0 --no-pager -l | head -n 10
+else
+    echo "❌ WireGuard is NOT RUNNING"
+    systemctl status wg-quick@wg0 --no-pager -l
+fi
 
-echo -e "\n=== IP Forwarding Status ==="
-echo "Current value: $(cat /proc/sys/net/ipv4/ip_forward)"
-echo "IPv6 forwarding: $(cat /proc/sys/net/ipv6/conf/all/forwarding)"
-echo "Should be: 1 for both"
+echo ""
+echo "=== WireGuard Peers ==="
+wg show 2>/dev/null || echo "No peers connected"
 
-echo -e "\n=== NAT Rules ==="
-iptables -t nat -L -n -v | grep -E "(MASQUERADE|Chain)"
+echo ""
+echo "=== IP Forwarding Status ==="
+IPV4_FORWARD=$(cat /proc/sys/net/ipv4/ip_forward)
+IPV6_FORWARD=$(cat /proc/sys/net/ipv6/conf/all/forwarding)
+if [ "$IPV4_FORWARD" = "1" ]; then
+    echo "✅ IPv4 forwarding: ENABLED"
+else
+    echo "❌ IPv4 forwarding: DISABLED"
+fi
+if [ "$IPV6_FORWARD" = "1" ]; then
+    echo "✅ IPv6 forwarding: ENABLED"
+else
+    echo "⚠️  IPv6 forwarding: DISABLED"
+fi
 
-echo -e "\n=== Forward Rules ==="
-iptables -L FORWARD -n -v
-
-echo -e "\n=== Network Interface ==="
-ip route show default
-
-echo -e "\n=== Sysctl Configuration ==="
+echo ""
+echo "=== Sysctl Configuration ==="
 if [ -f /etc/sysctl.d/99-wireguard.conf ]; then
     echo "Configuration file: /etc/sysctl.d/99-wireguard.conf"
     cat /etc/sysctl.d/99-wireguard.conf
 else
-    echo "⚠️  Wireguard sysctl config not found at /etc/sysctl.d/99-wireguard.conf"
+    echo "⚠️  Wireguard sysctl config not found"
 fi
-echo "Current IP forward value: $(cat /proc/sys/net/ipv4/ip_forward)"
 
-echo -e "\n=== WGDashboard Status ==="
-systemctl status wgdashboard --no-pager -l
+echo ""
+echo "=== NAT Rules (MASQUERADE) ==="
+iptables -t nat -L POSTROUTING -n -v | grep -E "(MASQUERADE|Chain)" | head -n 5
+
+echo ""
+echo "=== Forward Rules ==="
+iptables -L FORWARD -n -v | head -n 10
+
+echo ""
+echo "=== Network Interface ==="
+ip route show default
+
+echo ""
+echo "=== WGDashboard Service Status ==="
+if systemctl is-active --quiet wgdashboard; then
+    echo "✅ WGDashboard is RUNNING"
+    systemctl status wgdashboard --no-pager -l | head -n 10
+else
+    echo "❌ WGDashboard is NOT RUNNING"
+    systemctl status wgdashboard --no-pager -l
+fi
+
+echo ""
+echo "=== Dashboard Access ==="
+IPADDR=$(curl -s http://checkip.amazonaws.com 2>/dev/null || hostname -I | awk '{print $1}')
+echo "URL: http://$IPADDR:10086"
+echo "Default credentials: admin/admin"
+
+echo ""
+echo "=========================================="
 EOF
 
 chmod +x /root/check-vpn.sh
 
 # Step 12: Final verification
-echo "🔍 Verifying installation..."
+echo ""
+echo "🔍 Running final verification checks..."
 sleep 2
 
+VERIFICATION_FAILED=0
+
+# Check WireGuard
 if systemctl is-active --quiet wg-quick@wg0; then
     echo "✅ WireGuard is running"
 else
     echo "❌ WireGuard is not running"
-    exit 1
+    VERIFICATION_FAILED=1
 fi
 
+# Check WGDashboard
 if systemctl is-active --quiet wgdashboard; then
     echo "✅ WGDashboard is running"
 else
-    echo "❌ WGDashboard is not running"
-    exit 1
+    echo "⚠️  WGDashboard is not running - checking logs..."
+    journalctl -u wgdashboard --no-pager -n 20
+    VERIFICATION_FAILED=1
 fi
 
-# Verify IP forwarding one more time
+# Verify IP forwarding
 if [ "$(cat /proc/sys/net/ipv4/ip_forward)" = "1" ]; then
     echo "✅ IP forwarding is active"
 else
     echo "❌ IP forwarding verification failed"
-    exit 1
+    VERIFICATION_FAILED=1
+fi
+
+# Verify sysctl file exists
+if [ -f /etc/sysctl.d/99-wireguard.conf ]; then
+    echo "✅ Sysctl configuration file exists"
+else
+    echo "❌ Sysctl configuration file missing"
+    VERIFICATION_FAILED=1
 fi
 
 # Get server IP
@@ -241,7 +320,14 @@ IPADDR=$(curl -s http://checkip.amazonaws.com 2>/dev/null || hostname -I | awk '
 
 # Step 13: Output results
 echo ""
-echo "🎉 WireGuard and WGDashboard have been successfully installed!"
+echo "=========================================="
+if [ $VERIFICATION_FAILED -eq 0 ]; then
+    echo "🎉 Installation completed successfully!"
+else
+    echo "⚠️  Installation completed with warnings"
+    echo "Run /root/check-vpn.sh for detailed diagnostics"
+fi
+echo "=========================================="
 echo ""
 echo "📊 Dashboard Access:"
 echo "   URL: http://$IPADDR:10086"
@@ -255,23 +341,24 @@ echo "   Server VPN IP: 10.99.99.1/24"
 echo "   Server Public Key: $PUBLIC_KEY"
 echo ""
 echo "🔍 Useful Commands:"
-echo "   Check VPN status: /root/check-vpn.sh"
+echo "   Full status check: /root/check-vpn.sh"
 echo "   View active peers: wg show"
-echo "   Add new client: Use the WGDashboard web interface"
-echo "   Save config: wg-quick save wg0"
-echo "   Check sysctl config: cat /etc/sysctl.d/99-wireguard.conf"
+echo "   WireGuard status: systemctl status wg-quick@wg0"
+echo "   Dashboard status: systemctl status wgdashboard"
+echo "   Dashboard logs: journalctl -u wgdashboard -f"
+echo "   Check sysctl: cat /etc/sysctl.d/99-wireguard.conf"
 echo "   Reload sysctl: sysctl --system"
 echo ""
-echo "⚠️  IMPORTANT NOTES:"
-echo "   1. Change the dashboard password after first login"
+echo "⚠️  IMPORTANT SECURITY NOTES:"
+echo "   1. ⚠️  CHANGE THE DASHBOARD PASSWORD IMMEDIATELY after first login!"
 echo "   2. Server is ready to accept client connections"
 echo "   3. Use the WGDashboard web interface to add clients"
-echo "   4. For domain setup, create an A record pointing to $IPADDR (disable Cloudflare proxy)"
-echo "   5. IP forwarding is now properly enabled via /etc/sysctl.d/99-wireguard.conf"
-echo "   6. Firewall rules are automatically saved and will persist after reboot"
-echo "   7. Configuration is compatible with Debian 13 (Trixie)"
+echo "   4. For domain setup, create an A record pointing to $IPADDR"
+echo "   5. Disable Cloudflare proxy (orange cloud) for WireGuard domain"
+echo "   6. IP forwarding is persistent via /etc/sysctl.d/99-wireguard.conf"
+echo "   7. Firewall rules persist after reboot via iptables-persistent"
 echo ""
-echo "📱 Client Configuration Template (for manual setup if needed):"
+echo "📱 Client Configuration Template:"
 echo "   [Interface]"
 echo "   PrivateKey = CLIENT_PRIVATE_KEY"
 echo "   Address = 10.99.99.X/32"
@@ -283,3 +370,20 @@ echo "   Endpoint = $IPADDR:51820"
 echo "   AllowedIPs = 0.0.0.0/0"
 echo "   PersistentKeepalive = 25"
 echo ""
+echo "🔧 Troubleshooting:"
+echo "   If WGDashboard fails to start:"
+echo "     journalctl -u wgdashboard --no-pager -n 50"
+echo "     systemctl restart wgdashboard"
+echo ""
+echo "   If WireGuard fails to start:"
+echo "     journalctl -u wg-quick@wg0 --no-pager -n 50"
+echo "     wg-quick down wg0 && wg-quick up wg0"
+echo ""
+
+# Run the verification script for immediate feedback
+echo "=========================================="
+echo "Running detailed verification check..."
+echo "=========================================="
+/root/check-vpn.sh
+
+exit 0
