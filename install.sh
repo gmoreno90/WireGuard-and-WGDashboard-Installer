@@ -3,15 +3,48 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
+REPO_RAW_URL="https://raw.githubusercontent.com/gmoreno90/WireGuard-and-WGDashboard-Installer/main"
 
-for lib in common.sh detect-os.sh sysctl-config.sh firewall.sh wireguard.sh dashboard.sh; do
-    if [ -f "$LIB_DIR/$lib" ]; then
-        source "$LIB_DIR/$lib"
+download_lib() {
+    local lib="$1"
+    local url="$REPO_RAW_URL/lib/$lib"
+    local dest="$LIB_DIR/$lib"
+    
+    if [ ! -d "$LIB_DIR" ]; then
+        mkdir -p "$LIB_DIR"
+    fi
+    
+    echo "Downloading $lib..."
+    if command -v curl &>/dev/null; then
+        curl -fsSL "$url" -o "$dest"
+    elif command -v wget &>/dev/null; then
+        wget -q "$url" -O "$dest"
     else
-        echo "ERROR: Required library not found: $LIB_DIR/$lib"
+        echo "ERROR: curl or wget required to download libraries"
         exit 1
     fi
-done
+}
+
+load_or_download_libs() {
+    local libs="common.sh detect-os.sh sysctl-config.sh firewall.sh wireguard.sh dashboard.sh"
+    
+    for lib in $libs; do
+        if [ -f "$LIB_DIR/$lib" ]; then
+            source "$LIB_DIR/$lib"
+        else
+            echo "Library not found locally: $lib"
+            download_lib "$lib"
+            if [ -f "$LIB_DIR/$lib" ]; then
+                source "$LIB_DIR/$lib"
+            else
+                echo "ERROR: Failed to download $lib"
+                exit 1
+            fi
+        fi
+    done
+}
+
+load_or_download_libs
 
 trap rollback ERR INT TERM
 
