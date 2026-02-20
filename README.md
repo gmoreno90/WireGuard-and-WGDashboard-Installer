@@ -32,13 +32,13 @@ Universal installer for WireGuard VPN and WGDashboard web interface.
 ## Quick Start
 
 ```bash
-# Download
-curl -O https://raw.githubusercontent.com/gmoreno90/WireGuard-and-WGDashboard-Installer/main/install.sh
+# Clone the repository
+git clone https://github.com/gmoreno90/WireGuard-and-WGDashboard-Installer.git
 
-# Make executable
-chmod +x install.sh
+# Enter directory
+cd WireGuard-and-WGDashboard-Installer
 
-# Run
+# Run installer
 sudo ./install.sh
 ```
 
