@@ -38,6 +38,9 @@ git clone https://github.com/gmoreno90/WireGuard-and-WGDashboard-Installer.git
 # Enter directory
 cd WireGuard-and-WGDashboard-Installer
 
+# Make executable (just in case)
+chmod +x install.sh
+
 # Run installer
 sudo ./install.sh
 ```
