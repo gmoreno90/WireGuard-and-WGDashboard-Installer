@@ -1,83 +1,147 @@
-✅ README.md
+# WireGuard + WGDashboard Installer
 
-# WireGuard + WGDashboard Auto Installer for Debian 12
+Universal installer for WireGuard VPN and WGDashboard web interface.
 
-This repository provides a fully automated Bash script to install and configure **WireGuard** and **WGDashboard** on a Debian 12 server.
+## Supported Systems
 
-## 🚀 Features
+| System | Version | Status |
+|--------|---------|--------|
+| Debian | 12 (Bookworm) | Fully Supported |
+| Debian | 13 (Trixie) | Fully Supported |
+| Raspberry Pi OS | Bookworm | Fully Supported |
+| Raspberry Pi OS | Trixie | Fully Supported |
+| Ubuntu | 20.04/22.04/24.04 | Experimental |
 
-- Installs WireGuard VPN server
-- Generates server keys and creates `wg0.conf`
-- Configures NAT and IP forwarding
-- Installs and configures [WGDashboard](https://github.com/donaldzou/WGDashboard)
-- Starts both services and enables them on boot
-- Outputs the web dashboard address and login credentials
+## Features
 
-## 🖥️ Requirements
+- Automatic OS detection (Debian 12/13, Raspberry Pi OS)
+- Compatible sysctl configuration (works on systems with or without `/etc/sysctl.conf`)
+- Automatic firewall configuration (ufw, firewalld, iptables)
+- Automatic network interface detection
+- Installation logging to `/var/log/wireguard-installer.log`
+- Automatic rollback on failure
+- Detection of existing installations (prevents accidental overwrites)
 
-- A fresh **Debian 12** system
+## Requirements
+
+- Fresh system (no existing WireGuard/WGDashboard installation)
 - Root access
-- An internet connection
-- Ports `51820/UDP` and `10086/TCP` open on your firewall/router
-- If you plan to use a domain (e.g., vpn.example.com), make sure to create an A record pointing to YOUR_SERVER_IP with Cloudflare Proxy DISABLED (grey cloud).
+- Internet connection
+- Open ports: `51820/UDP` (WireGuard) and `10086/TCP` (Dashboard)
 
-## 📦 What It Installs
+## Quick Start
 
-- `wireguard`
-- `python3`, `pip`, `git`
-- `iptables-persistent`
-- WGDashboard via Git
+```bash
+# Download
+curl -O https://raw.githubusercontent.com/gmoreno90/WireGuard-and-WGDashboard-Installer/main/install.sh
 
-## ⚙️ How to Use
+# Make executable
+chmod +x install.sh
 
-Download the script:
+# Run
+sudo ./install.sh
+```
 
-    curl -O https://raw.githubusercontent.com/gmoreno90/WireGuard-and-WGDashboard-Installer/refs/heads/main/install-wireguard-wgdashboard.sh
+## After Installation
 
+Access the dashboard at: `http://YOUR_SERVER_IP:10086`
 
-Make it executable:
+Default credentials:
+- Username: `admin`
+- Password: `admin`
 
-    chmod +x install-wireguard-wgdashboard.sh
+**Important:** Change the default password immediately after first login!
 
+## Project Structure
 
-Run the script:
+```
+.
+├── install.sh              # Main entry point
+├── lib/
+│   ├── common.sh           # Logging, colors, utilities
+│   ├── detect-os.sh        # OS detection
+│   ├── sysctl-config.sh    # IP forwarding config
+│   ├── firewall.sh         # Firewall management
+│   ├── wireguard.sh        # WireGuard setup
+│   └── dashboard.sh        # WGDashboard setup
+└── README.md
+```
 
-    sudo ./install-wireguard-wgdashboard.sh
+## Configuration
 
+Default settings can be modified in the library files:
 
-After installation, access the dashboard in your browser:
+| Setting | File | Default |
+|---------|------|---------|
+| VPN Port | `lib/wireguard.sh` | 51820 |
+| VPN Network | `lib/wireguard.sh` | 10.99.99.0/24 |
+| Dashboard Port | `lib/dashboard.sh` | 10086 |
+| Dashboard User | `lib/dashboard.sh` | admin |
+| Dashboard Pass | `lib/dashboard.sh` | admin |
 
-    http://YOUR_SERVER_IP:10086
+## Troubleshooting
 
+### Check Status
+```bash
+/root/check-vpn.sh
+```
 
-Default Login credentials for Username and Password:
+### View Logs
+```bash
+# Installation log
+cat /var/log/wireguard-installer.log
 
-    admin
+# WireGuard service
+journalctl -u wg-quick@wg0 -f
 
+# Dashboard service
+journalctl -u wgdashboard -f
+```
 
-## 🔐 Notes
+### Common Issues
 
-By default, the WireGuard server uses 10.99.99.1/24.
+**IP Forwarding not working:**
+```bash
+# Check current value
+cat /proc/sys/net/ipv4/ip_forward
 
-You can change the ListenPort, credentials, or dashboard port in the config.json file (/opt/WGDashboard/config.json).
+# Apply sysctl settings
+sysctl --system
+```
 
-The dashboard runs as a systemd service named wgdashboard.
+**Port already in use:**
+```bash
+# Check what's using the port
+ss -tlnp | grep 10086
+ss -ulnp | grep 51820
+```
 
+**Dashboard not starting:**
+```bash
+# Check Python dependencies
+python3 -c "import flask, bcrypt, psutil"
 
-## 📚 Resources
+# Reinstall requirements
+pip3 install --break-system-packages -r /opt/WGDashboard/src/requirements.txt
+```
 
-WireGuard Quickstart
+## Uninstallation
 
-WGDashboard GitHub
+```bash
+systemctl stop wg-quick@wg0 wgdashboard
+systemctl disable wg-quick@wg0 wgdashboard
+rm -f /etc/systemd/system/wgdashboard.service
+rm -rf /etc/wireguard
+rm -rf /opt/WGDashboard
+rm -f /etc/sysctl.d/99-wireguard.conf
+systemctl daemon-reload
+```
 
+## Resources
 
-## 🛑 Disclaimer
+- [WireGuard Documentation](https://www.wireguard.com/quickstart/)
+- [WGDashboard GitHub](https://github.com/donaldzou/WGDashboard)
 
-This script is provided "as is" with no warranty. Use it at your own risk and always review the code before executing on production systems.
+## Disclaimer
 
-Created by Devrimer Duman
-
-
-## ⭐️ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=gmoreno90/WireGuard-and-WGDasboard-Installer&type=Date)](https://www.star-history.com/#gmoreno90/WireGuard-and-WGDasboard-Installer&Date)
+This script is provided "as is" with no warranty. Use at your own risk and always review the code before running on production systems.
