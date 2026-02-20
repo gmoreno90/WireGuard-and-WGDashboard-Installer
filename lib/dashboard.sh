@@ -78,35 +78,38 @@ install_python_requirements() {
         log_warn "requirements.txt not found at $requirements_file"
         log_info "Searching for requirements.txt..."
         requirements_file=$(find "$DASHBOARD_DIR" -name "requirements.txt" 2>/dev/null | head -1)
-        
-        if [ -z "$requirements_file" ]; then
-            log_warn "No requirements.txt found, attempting to install common dependencies"
-            pip3 install --break-system-packages flask bcrypt psutil 2>/dev/null || true
-            return 0
-        fi
     fi
     
-    pip3 install --break-system-packages -r "$requirements_file" 2>&1 | tee /tmp/pip_install.log || {
-        if grep -q "Cannot uninstall" /tmp/pip_install.log 2>/dev/null; then
-            log_warn "Dependency conflict detected, attempting workaround..."
-            pip3 install --break-system-packages --ignore-installed -r "$requirements_file" 2>/dev/null || {
-                log_warn "Some packages may not have installed correctly"
+    if [ -n "$requirements_file" ] && [ -f "$requirements_file" ]; then
+        log_info "Installing from requirements.txt..."
+        pip3 install --break-system-packages --ignore-installed -r "$requirements_file" 2>&1 | tee /tmp/pip_install.log || true
+    fi
+    
+    log_info "Verifying and installing critical dependencies..."
+    
+    local critical_deps="flask bcrypt psutil pyotp"
+    
+    for dep in $critical_deps; do
+        if ! python3 -c "import $dep" 2>/dev/null; then
+            log_warn "$dep not found, installing..."
+            pip3 install --break-system-packages --ignore-installed "$dep" 2>/dev/null || {
+                log_warn "Could not install $dep"
             }
         fi
-    }
+    done
     
-    python3 -c "import flask" 2>/dev/null || {
-        log_warn "Flask not installed, attempting direct installation..."
-        pip3 install --break-system-packages flask 2>/dev/null || true
-    }
+    local missing=0
+    for dep in $critical_deps; do
+        if ! python3 -c "import $dep" 2>/dev/null; then
+            log_error "Critical dependency missing: $dep"
+            ((missing++))
+        fi
+    done
     
-    python3 -c "import bcrypt" 2>/dev/null || {
-        pip3 install --break-system-packages bcrypt 2>/dev/null || true
-    }
-    
-    python3 -c "import psutil" 2>/dev/null || {
-        pip3 install --break-system-packages psutil 2>/dev/null || true
-    }
+    if [ $missing -gt 0 ]; then
+        log_error "$missing critical dependencies could not be installed"
+        return 1
+    fi
     
     log_success "Python requirements installed"
 }
