@@ -120,21 +120,28 @@ create_dashboard_config() {
     local config_dir="$DASHBOARD_DIR/src"
     mkdir -p "$config_dir"
     
-    local wg_config_path="/etc/wireguard/${WG_INTERFACE:-wg0}.conf"
+    local ini_file="$config_dir/wg-dashboard.ini"
+    local server_ip="${PUBLIC_IP:-YOUR_SERVER_IP}"
+    local wg_conf_dir="/etc/wireguard"
     
-    cat > "$config_dir/config.json" << EOF
-{
-  "wg_conf_path": "$wg_config_path",
-  "interface": "${WG_INTERFACE:-wg0}",
-  "listen_port": $DASHBOARD_PORT,
-  "username": "$DASHBOARD_USER",
-  "password": "$DASHBOARD_PASS"
-}
+    cat > "$ini_file" << EOF
+[Server]
+app_ip = 0.0.0.0
+app_port = $DASHBOARD_PORT
+wg_conf_path = $wg_conf_dir
+
+[Peers]
+remote_endpoint = $server_ip
+peer_global_DNS = 1.1.1.1
+peer_endpoint_allowed_ip = 0.0.0.0/0
+peer_MTU = 1420
+peer_keep_alive = 21
 EOF
     
-    chmod 600 "$config_dir/config.json"
+    chmod 600 "$ini_file"
     
-    log_success "WGDashboard configuration created"
+    log_success "Created $ini_file (endpoint: $server_ip)"
+    return 0
 }
 
 create_dashboard_service() {

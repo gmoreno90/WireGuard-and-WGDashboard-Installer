@@ -3,12 +3,10 @@
 configure_ip_forwarding() {
     log_info "Configuring IP forwarding..."
     
-    get_sysctl_method
+    configure_sysctl_d
     
-    if [ "$SYSCTL_METHOD" = "sysctl.conf" ]; then
+    if [ -f /etc/sysctl.conf ]; then
         configure_sysctl_conf
-    else
-        configure_sysctl_d
     fi
     
     apply_sysctl
@@ -70,20 +68,19 @@ EOF
 apply_sysctl() {
     log_info "Applying sysctl settings..."
     
-    if [ "$SYSCTL_METHOD" = "sysctl.d" ]; then
-        sysctl --system 2>/dev/null || {
-            sysctl -p /etc/sysctl.d/99-wireguard.conf 2>/dev/null || {
-                log_warn "Could not apply sysctl settings via sysctl --system"
-            }
+    sysctl --system || {
+        log_warn "sysctl --system reported issues, trying direct load..."
+        sysctl -p /etc/sysctl.d/99-wireguard.conf || {
+            log_warn "Could not load sysctl drop-in directly"
         }
-    else
-        sysctl -p 2>/dev/null || {
-            log_warn "Could not apply sysctl settings via sysctl -p"
-        }
-    fi
+    }
     
-    sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
-    sysctl -w net.ipv6.conf.all.forwarding=1 2>/dev/null || true
+    sysctl -w net.ipv4.ip_forward=1 || {
+        log_error "Failed to set net.ipv4.ip_forward=1 at runtime"
+        return 1
+    }
+    
+    sysctl -w net.ipv6.conf.all.forwarding=1 || true
     
     log_success "Applied sysctl settings"
 }

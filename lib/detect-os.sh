@@ -45,6 +45,8 @@ detect_os() {
     if [ "$OS_IS_RASPBERRY_PI" = true ]; then
         log_info "Platform: Raspberry Pi"
     fi
+    
+    get_sysctl_method
 }
 
 validate_os_support() {
@@ -118,15 +120,9 @@ has_sysctl_conf() {
 }
 
 get_sysctl_method() {
-    if has_sysctl_conf; then
-        SYSCTL_METHOD="sysctl.conf"
-        SYSCTL_FILE="/etc/sysctl.conf"
-        log_debug "Using traditional sysctl.conf"
-    else
-        SYSCTL_METHOD="sysctl.d"
-        SYSCTL_FILE="/etc/sysctl.d/99-wireguard.conf"
-        log_debug "Using modern sysctl.d directory"
-    fi
+    SYSCTL_METHOD="sysctl.d"
+    SYSCTL_FILE="/etc/sysctl.d/99-wireguard.conf"
+    log_debug "Using sysctl.d drop-in for persistence"
 }
 
 print_os_info() {
